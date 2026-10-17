@@ -133,3 +133,8 @@ This project participates in the **Stellar Wave Program** on [Drips Wave](https:
 See [CONTRIBUTING.md](./CONTRIBUTING.md) for the full workflow.
 
 > **Note:** Do not start coding until assigned to an issue by a maintainer.
+
+## Handsoff notes
+
+<!-- handsoff-issue-734 -->
+- #734: Add test coverage for streamNotificationWatcher firing both thresholds when opened after both have elapsed
