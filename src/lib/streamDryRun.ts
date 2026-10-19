@@ -97,6 +97,10 @@ export function simulateStreamDryRun(input: StreamDryRunInput): StreamDryRunResu
   const checkpoints: DryRunCheckpoint[] = DRY_RUN_PROGRESS_MARKERS.map((progress) => {
     const idx = Math.min(points.length - 1, Math.round(progress * (points.length - 1)));
     const point = points[idx];
+    // The fee is charged exactly once, on the cumulative amount claimable at
+    // this checkpoint (#716). With a cliff, the amount released at the cliff
+    // is already part of `point.claimable`, so it must not be charged again
+    // as a separate pre-cliff chunk.
     const { fee, net } = calcWithdrawBreakdown(point.claimable, feeBasisPoints);
     return {
       progress,

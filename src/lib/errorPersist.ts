@@ -50,3 +50,33 @@ export function clearPersistedStreamError(streamId: string): void {
     // ignore
   }
 }
+
+/**
+ * Clear the persisted error for `streamId` as soon as `load` resolves with
+ * a successful result, whether or not the component that started the load
+ * is still mounted (#714).
+ *
+ * The stream page ignores a fetch result once its effect has been cleaned
+ * up, so a clear done there is skipped if the user navigates away before
+ * the retry settles. Attaching the clear to the fetch promise itself means
+ * a later return to the stream does not show an error that already
+ * resolved. Failures are left alone: the caller decides whether to persist
+ * them, and a stale failure must never overwrite a newer result.
+ *
+ * Returns `load` unchanged so callers can keep awaiting or racing it.
+ */
+export function clearPersistedStreamErrorOnSuccess<T>(
+  streamId: string,
+  load: Promise<T>,
+  isSuccess: (result: T) => boolean = () => true,
+): Promise<T> {
+  load.then(
+    (result) => {
+      if (isSuccess(result)) clearPersistedStreamError(streamId);
+    },
+    () => {
+      // Failure handling stays with the caller.
+    },
+  );
+  return load;
+}
