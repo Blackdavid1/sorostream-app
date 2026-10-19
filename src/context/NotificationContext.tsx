@@ -40,6 +40,11 @@ interface NotificationContextValue {
   countFor: (section: string) => number;
   /** Reset a section's unread count to zero (call when the user visits it). */
   clearSection: (section: string) => void;
+  /**
+   * Zero every section's unread count in this tab and in every other open tab
+   * (e.g. for a "clear all notifications" button).
+   */
+  markAllAsReadEverywhere: () => void;
   /** Manually trigger an evaluation of stream notifications (#76). */
   checkNotifications: () => Promise<void>;
 }
@@ -177,11 +182,25 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
     [],
   );
 
+  const markAllAsReadEverywhere = useCallback(() => {
+    setCounts((prev) => {
+      // Include sections only known from storage (e.g. written by another
+      // tab before this one synced) so nothing is left behind.
+      const sections = new Set([...Object.keys(prev), ...Object.keys(load().counts)]);
+      const next: Counts = {};
+      for (const section of sections) next[section] = 0;
+      // Writing to localStorage fires a "storage" event in every other tab,
+      // which the cross-tab sync effect above adopts.
+      persist({ counts: next, lastSeenId: lastSeenIdRef.current });
+      return next;
+    });
+  }, []);
+
   const countFor = useCallback((section: string) => counts[section] ?? 0, [counts]);
 
   const value = useMemo(
-    () => ({ counts, countFor, clearSection, checkNotifications }),
-    [counts, countFor, clearSection, checkNotifications],
+    () => ({ counts, countFor, clearSection, markAllAsReadEverywhere, checkNotifications }),
+    [counts, countFor, clearSection, markAllAsReadEverywhere, checkNotifications],
   );
 
   return (
