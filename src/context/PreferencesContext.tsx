@@ -20,11 +20,21 @@ import {
 
 export const PREFERENCES_STORAGE_KEY = "sorostream-preferences";
 
+/** Every theme value the app currently supports. */
+export const PREFERRED_THEMES = ["light", "dark", "high-contrast", "system"] as const;
+
+export type PreferredTheme = (typeof PREFERRED_THEMES)[number];
+
 export interface StreamPreferences {
   defaultToken: string;
   defaultDuration: number;
   defaultCliffDuration: number;
-  preferredTheme: "light" | "dark" | "high-contrast" | "system";
+  preferredTheme: PreferredTheme;
+}
+
+/** True when `value` is one of the currently supported theme names. */
+export function isPreferredTheme(value: unknown): value is PreferredTheme {
+  return typeof value === "string" && (PREFERRED_THEMES as readonly string[]).includes(value);
 }
 
 interface PreferencesContextValue extends StreamPreferences {
@@ -55,7 +65,11 @@ function loadPreferences(): StreamPreferences {
       defaultToken: parsed.defaultToken ?? DEFAULT_PREFERENCES.defaultToken,
       defaultDuration: parsed.defaultDuration ?? DEFAULT_PREFERENCES.defaultDuration,
       defaultCliffDuration: parsed.defaultCliffDuration ?? DEFAULT_PREFERENCES.defaultCliffDuration,
-      preferredTheme: parsed.preferredTheme ?? DEFAULT_PREFERENCES.preferredTheme,
+      // A theme saved by an older app version may no longer exist; fall back
+      // to the default instead of applying an unknown theme name.
+      preferredTheme: isPreferredTheme(parsed.preferredTheme)
+        ? parsed.preferredTheme
+        : DEFAULT_PREFERENCES.preferredTheme,
     };
   } catch {
     return DEFAULT_PREFERENCES;
