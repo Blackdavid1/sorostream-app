@@ -11,12 +11,28 @@ import {
 } from "react";
 import { useWallet } from "@/src/context/WalletContext";
 
-const MAX_BOOKMARKS = 20;
+export const MAX_BOOKMARKS = 20;
 
 interface BookmarksContextValue {
   bookmarkedIds: Set<string>;
   isBookmarked: (id: string) => boolean;
   toggleBookmark: (id: string) => void;
+  /** Maximum number of bookmarks kept per wallet. */
+  maxBookmarks: number;
+  /** True when the cap is reached and new bookmarks will be dropped. */
+  isAtCapacity: boolean;
+  /**
+   * The bookmark that would be dropped if `toggleBookmark(id)` were called
+   * now, or null if nothing would be dropped. When the cap is reached the
+   * incoming bookmark is the one dropped (existing bookmarks are kept), so
+   * this returns `id` itself in that case. Use it to warn the user first.
+   */
+  getEvictionCandidate: (id: string) => string | null;
+  /**
+   * The bookmark dropped by the most recent `toggleBookmark` call because the
+   * cap was reached, or null if that call did not drop anything.
+   */
+  lastEvictedId: string | null;
 }
 
 const BookmarksContext = createContext<BookmarksContextValue | undefined>(undefined);
@@ -51,9 +67,11 @@ function saveBookmarks(address: string | null, ids: Set<string>): void {
 export function BookmarksProvider({ children }: { children: ReactNode }) {
   const { address } = useWallet();
   const [bookmarkedIds, setBookmarkedIds] = useState<Set<string>>(new Set());
+  const [lastEvictedId, setLastEvictedId] = useState<string | null>(null);
 
   useEffect(() => {
     setBookmarkedIds(loadBookmarks(address));
+    setLastEvictedId(null);
   }, [address]);
 
   const toggleBookmark = useCallback(
@@ -63,9 +81,14 @@ export function BookmarksProvider({ children }: { children: ReactNode }) {
         if (next.has(id)) {
           next.delete(id);
         } else {
-          if (next.size >= MAX_BOOKMARKS) return prev;
+          if (next.size >= MAX_BOOKMARKS) {
+            // Cap reached: the new bookmark is dropped, existing ones stay.
+            setLastEvictedId(id);
+            return prev;
+          }
           next.add(id);
         }
+        setLastEvictedId(null);
         saveBookmarks(address, next);
         return next;
       });
@@ -78,9 +101,24 @@ export function BookmarksProvider({ children }: { children: ReactNode }) {
     [bookmarkedIds],
   );
 
+  const isAtCapacity = bookmarkedIds.size >= MAX_BOOKMARKS;
+
+  const getEvictionCandidate = useCallback(
+    (id: string) => (!bookmarkedIds.has(id) && bookmarkedIds.size >= MAX_BOOKMARKS ? id : null),
+    [bookmarkedIds],
+  );
+
   const value = useMemo(
-    () => ({ bookmarkedIds, isBookmarked, toggleBookmark }),
-    [bookmarkedIds, isBookmarked, toggleBookmark],
+    () => ({
+      bookmarkedIds,
+      isBookmarked,
+      toggleBookmark,
+      maxBookmarks: MAX_BOOKMARKS,
+      isAtCapacity,
+      getEvictionCandidate,
+      lastEvictedId,
+    }),
+    [bookmarkedIds, isBookmarked, toggleBookmark, isAtCapacity, getEvictionCandidate, lastEvictedId],
   );
 
   return (
@@ -93,7 +131,7 @@ export function BookmarksProvider({ children }: { children: ReactNode }) {
 /**
  * Access bookmarked streams.
  *
- * @returns {BookmarksContextValue} Bookmarked stream IDs plus `isBookmarked` and `toggleBookmark` helpers.
+ * @returns {BookmarksContextValue} Bookmarked stream IDs, `isBookmarked`/`toggleBookmark` helpers and cap/eviction info.
  * @throws {Error} When called outside a `BookmarksProvider`.
  */
 export function useBookmarks() {
