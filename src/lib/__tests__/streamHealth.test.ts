@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   getStreamHealth,
+  getStreamHealthDetails,
   EXPIRING_SOON_THRESHOLD_MS,
   type HealthStreamInput,
 } from "../streamHealth";
@@ -217,5 +218,55 @@ describe("getStreamHealth — real-clock default", () => {
     const past = new Date(Date.now() - 10_000).toISOString();
     const stream: HealthStreamInput = { status: "Active", endTime: past };
     expect(getStreamHealth(stream)).toBe("Expired");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 7. Expired streams with and without an unclaimed balance (#717)
+// ---------------------------------------------------------------------------
+
+describe("getStreamHealthDetails — unclaimed balance on Expired streams", () => {
+  const ended: HealthStreamInput = {
+    status: "Active",
+    endTime: new Date(NOW - 1000).toISOString(),
+  };
+
+  it("distinguishes an expired stream with funds left from a fully claimed one", () => {
+    const withFunds = getStreamHealthDetails(ended, 5_000_000, NOW);
+    const claimed = getStreamHealthDetails(ended, 0, NOW);
+
+    expect(withFunds.status).toBe("Expired");
+    expect(claimed.status).toBe("Expired");
+    expect(withFunds.hasUnclaimedBalance).toBe(true);
+    expect(claimed.hasUnclaimedBalance).toBe(false);
+  });
+
+  it("accepts the string amounts returned by claimableNow", () => {
+    expect(getStreamHealthDetails(ended, "1", NOW).hasUnclaimedBalance).toBe(true);
+    expect(getStreamHealthDetails(ended, "0", NOW).hasUnclaimedBalance).toBe(false);
+    expect(getStreamHealthDetails(ended, "not-a-number", NOW).hasUnclaimedBalance).toBe(false);
+  });
+
+  it("treats an 'Ended' status the same way", () => {
+    const stream = makeStream({ status: "Ended" });
+    expect(getStreamHealthDetails(stream, 10, NOW)).toEqual({
+      status: "Expired",
+      hasUnclaimedBalance: true,
+    });
+  });
+
+  it("keeps the priority order and only flags Expired streams", () => {
+    const cases: Array<[HealthStreamInput, string]> = [
+      [{ status: "Cancelled", endTime: new Date(NOW - 1000).toISOString() }, "Cancelled"],
+      [{ status: "Paused", endTime: new Date(NOW - 1000).toISOString() }, "Paused"],
+      [makeStream({ endOffsetMs: 3600_000 }), "Expiring Soon"],
+      [makeStream({ endOffsetMs: EXPIRING_SOON_THRESHOLD_MS * 3 }), "Active"],
+    ];
+    for (const [stream, status] of cases) {
+      const details = getStreamHealthDetails(stream, 10, NOW);
+      expect(details.status).toBe(status);
+      expect(details.status).toBe(getStreamHealth(stream, NOW));
+      expect(details.hasUnclaimedBalance).toBe(false);
+    }
   });
 });

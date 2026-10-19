@@ -3,6 +3,7 @@ import {
   readPersistedStreamError,
   writePersistedStreamError,
   clearPersistedStreamError,
+  clearPersistedStreamErrorOnSuccess,
 } from "../errorPersist";
 
 const STREAM_A = "stream-a";
@@ -47,5 +48,78 @@ describe("errorPersist", () => {
   it("ignores an empty stream id", () => {
     writePersistedStreamError("", "should not be stored");
     expect(readPersistedStreamError("")).toBeNull();
+  });
+});
+
+describe("clearPersistedStreamErrorOnSuccess (#714)", () => {
+  function deferred<T>() {
+    let resolve!: (value: T) => void;
+    let reject!: (reason: unknown) => void;
+    const promise = new Promise<T>((res, rej) => {
+      resolve = res;
+      reject = rej;
+    });
+    return { promise, resolve, reject };
+  }
+
+  it("clears the error when a retry resolves after the component has unmounted", async () => {
+    writePersistedStreamError(STREAM_A, "Network timeout.");
+
+    // Mount: the retry starts and the component tracks a `cancelled` flag.
+    const fetch = deferred<{ stream: { id: string } | null }>();
+    let cancelled = false;
+    const load = clearPersistedStreamErrorOnSuccess(
+      STREAM_A,
+      fetch.promise,
+      (result) => Boolean(result.stream),
+    );
+    void load.then(() => {
+      if (cancelled) return; // what the unmounted page does with the result
+    });
+
+    // Unmount before the retry settles.
+    cancelled = true;
+    expect(readPersistedStreamError(STREAM_A)).toBe("Network timeout.");
+
+    // The retry now succeeds while nothing is mounted.
+    fetch.resolve({ stream: { id: STREAM_A } });
+    await load;
+    await Promise.resolve();
+
+    expect(readPersistedStreamError(STREAM_A)).toBeNull();
+  });
+
+  it("still clears when the retry resolves while mounted", async () => {
+    writePersistedStreamError(STREAM_A, "Network timeout.");
+    await clearPersistedStreamErrorOnSuccess(STREAM_A, Promise.resolve({ ok: true }));
+    await Promise.resolve();
+    expect(readPersistedStreamError(STREAM_A)).toBeNull();
+  });
+
+  it("keeps the error when the result is not a success", async () => {
+    writePersistedStreamError(STREAM_A, "Stream not found.");
+    await clearPersistedStreamErrorOnSuccess(
+      STREAM_A,
+      Promise.resolve({ stream: null }),
+      (result) => Boolean(result.stream),
+    );
+    await Promise.resolve();
+    expect(readPersistedStreamError(STREAM_A)).toBe("Stream not found.");
+  });
+
+  it("keeps the error and passes the rejection through when the retry fails", async () => {
+    writePersistedStreamError(STREAM_A, "Network timeout.");
+    const load = clearPersistedStreamErrorOnSuccess(STREAM_A, Promise.reject(new Error("boom")));
+    await expect(load).rejects.toThrow("boom");
+    expect(readPersistedStreamError(STREAM_A)).toBe("Network timeout.");
+  });
+
+  it("only clears the stream id it was given", async () => {
+    writePersistedStreamError(STREAM_A, "A failed.");
+    writePersistedStreamError(STREAM_B, "B failed.");
+    await clearPersistedStreamErrorOnSuccess(STREAM_A, Promise.resolve(true));
+    await Promise.resolve();
+    expect(readPersistedStreamError(STREAM_A)).toBeNull();
+    expect(readPersistedStreamError(STREAM_B)).toBe("B failed.");
   });
 });

@@ -55,6 +55,7 @@ import {
   readPersistedStreamError,
   writePersistedStreamError,
   clearPersistedStreamError,
+  clearPersistedStreamErrorOnSuccess,
 } from "@/src/lib/errorPersist";
 import { useKeyboardShortcuts, type ShortcutGroup } from "@/src/lib/useKeyboardShortcuts";
 import { useBookmarks } from "@/src/context/BookmarksContext";
@@ -461,8 +462,14 @@ export default function StreamDetail({ params }: { params: { id: string } }) {
           setTimeout(() => reject(new Error("Network timeout: stream data could not be loaded within 10 seconds.")), STREAM_FETCH_TIMEOUT_MS),
         );
         // One batched request for metadata + balance + history (#603).
+        // The persisted error is cleared from the fetch itself, so a retry
+        // that succeeds after this component unmounts still clears it (#714).
         const details = await Promise.race([
-          sorostream.getStreamDetails(params.id),
+          clearPersistedStreamErrorOnSuccess(
+            params.id,
+            sorostream.getStreamDetails(params.id),
+            (result) => Boolean(result.stream),
+          ),
           timeoutPromise,
         ]);
         if (cancelled) return;
