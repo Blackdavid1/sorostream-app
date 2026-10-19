@@ -77,6 +77,23 @@ export function getAllTags(): string[] {
   return Array.from(set).sort();
 }
 
+/**
+ * Rename a tag across every stream. If a stream already has `newName`,
+ * the two tags are merged so no stream ends up with a duplicate.
+ */
+export function renameTag(oldName: string, newName: string): void {
+  const to = newName.trim();
+  if (!to || oldName === to) return;
+  const map = load();
+  for (const [streamId, tags] of Object.entries(map)) {
+    if (!tags.includes(oldName)) continue;
+    map[streamId] = Array.from(
+      new Set(tags.map((t) => (t === oldName ? to : t))),
+    );
+  }
+  save(map);
+}
+
 /** Return the entire tag map. */
 export function getTagMap(): TagMap {
   return load();

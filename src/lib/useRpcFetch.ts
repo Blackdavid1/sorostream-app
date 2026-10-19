@@ -14,6 +14,12 @@ import { useToast } from "./toast";
 const RATE_LIMIT_TOAST_KEY = "rpc-rate-limit";
 
 /**
+ * The caller currently driving the shared rate-limit toast. Only one
+ * countdown may update the toast at a time; other callers wait silently.
+ */
+let toastOwner: symbol | null = null;
+
+/**
  * Wrap RPC calls with retry handling and rate-limit toast notifications.
  *
  * @returns {<T>(fn: () => Promise<T>) => Promise<T>} A function that executes the given RPC call.
@@ -24,8 +30,14 @@ export function useRpcFetch() {
 
   const fetch = useCallback(
     <T>(fn: () => Promise<T>): Promise<T> => {
+      const caller = Symbol("rpc-caller");
+      const release = () => {
+        if (toastOwner === caller) toastOwner = null;
+      };
       const opts: RpcClientOptions = {
         onRateLimit(secondsLeft, attempt) {
+          if (toastOwner === null) toastOwner = caller;
+          if (toastOwner !== caller) return;
           const msg =
             secondsLeft > 0
               ? `Rate limited — retrying in ${secondsLeft}s`
@@ -38,6 +50,8 @@ export function useRpcFetch() {
           activeToastId.current = id;
         },
         onRetrySuccess() {
+          if (toastOwner !== caller) return;
+          release();
           if (activeToastId.current !== null) {
             removeToast(activeToastId.current);
             activeToastId.current = null;
@@ -46,7 +60,7 @@ export function useRpcFetch() {
         },
       };
 
-      return rpcFetch(fn, opts);
+      return rpcFetch(fn, opts).finally(release);
     },
     [upsertPersistentToast, removeToast, addToast],
   );

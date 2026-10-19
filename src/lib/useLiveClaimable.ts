@@ -25,15 +25,24 @@ export function useLiveClaimable(
   // object identity don't restart the timer.
   const streamRef = useRef(stream);
   streamRef.current = stream;
+  // Track the live interval so rapid active toggling can never leave two running.
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
+    const stop = () => {
+      if (intervalRef.current !== null) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
+    };
+    stop();
     if (!active) return;
     // Refresh immediately so a re-opened modal never shows a stale value.
     setClaimable(Number(claimableNow(streamRef.current)));
-    const id = setInterval(() => {
+    intervalRef.current = setInterval(() => {
       setClaimable(Number(claimableNow(streamRef.current)));
     }, intervalMs);
-    return () => clearInterval(id);
+    return stop;
   }, [active, intervalMs]);
 
   return claimable;
