@@ -19,9 +19,15 @@ export function mergeById<T extends { id: string }>(prev: T[], next: T[]): T[] {
   return changed ? merged : prev;
 }
 
+/**
+ * Compares two field values. Dates are compared by timestamp rather than
+ * reference, so a refetched row with a new Date instance holding the same
+ * time is treated as unchanged (#712). Object.is also makes two invalid
+ * Dates (NaN timestamps) compare equal.
+ */
 function valueEqual(a: unknown, b: unknown): boolean {
   if (Object.is(a, b)) return true;
-  if (a instanceof Date && b instanceof Date) return a.getTime() === b.getTime();
+  if (a instanceof Date && b instanceof Date) return Object.is(a.getTime(), b.getTime());
   return false;
 }
 

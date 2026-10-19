@@ -66,14 +66,49 @@ function openDB(): Promise<IDBDatabase> {
 }
 
 /**
+ * Walk the whole store (every address) and delete rows older than `cutoff`.
+ * Runs inside the caller's readwrite transaction.
+ */
+function deleteExpired(store: IDBObjectStore, cutoff: number): void {
+  const request = store.openCursor();
+  request.onsuccess = () => {
+    const cursor = request.result;
+    if (!cursor) return;
+    const snapshot = cursor.value as BalanceSnapshot;
+    if (new Date(snapshot.timestamp).getTime() < cutoff) cursor.delete();
+    cursor.continue();
+  };
+}
+
+/**
  * Store a balance snapshot. If a snapshot for the same address+timestamp
  * already exists it is silently replaced.
+ *
+ * Expired rows for every address are purged in the same transaction, so
+ * old snapshots don't pile up in IndexedDB when the chart (which also
+ * prunes on read) is rarely opened (#713).
  */
 export async function saveSnapshot(snapshot: BalanceSnapshot): Promise<void> {
   const db = await openDB();
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE_NAME, "readwrite");
-    tx.objectStore(STORE_NAME).put(snapshot);
+    const store = tx.objectStore(STORE_NAME);
+    store.put(snapshot);
+    deleteExpired(store, Date.now() - MAX_AGE_MS);
+    tx.oncomplete = () => { db.close(); resolve(); };
+    tx.onerror = () => { db.close(); reject(tx.error); };
+  });
+}
+
+/**
+ * Delete every snapshot older than `maxAgeMs` (default 90 days) across all
+ * addresses. Called on every write; also safe to call as a periodic sweep.
+ */
+export async function pruneExpiredSnapshots(maxAgeMs: number = MAX_AGE_MS): Promise<void> {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, "readwrite");
+    deleteExpired(tx.objectStore(STORE_NAME), Date.now() - maxAgeMs);
     tx.oncomplete = () => { db.close(); resolve(); };
     tx.onerror = () => { db.close(); reject(tx.error); };
   });

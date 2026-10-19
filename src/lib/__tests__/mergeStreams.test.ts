@@ -21,3 +21,40 @@ describe("mergeById", () => {
     expect(mergeById(prev, [])).toEqual([]);
   });
 });
+
+describe("mergeById with Date fields (#712)", () => {
+  it("treats items that differ only by Date instance (same timestamp) as unchanged", () => {
+    const prev = [
+      { id: "a", endTime: new Date("2026-01-01T00:00:00Z") },
+      { id: "b", endTime: new Date("2026-02-01T00:00:00Z") },
+    ];
+    const next = [
+      { id: "a", endTime: new Date("2026-01-01T00:00:00Z") },
+      { id: "b", endTime: new Date("2026-02-01T00:00:00Z") },
+    ];
+    expect(next[0].endTime).not.toBe(prev[0].endTime);
+    expect(mergeById(prev, next)).toBe(prev);
+  });
+
+  it("still detects a genuinely different Date value", () => {
+    const prev = [
+      { id: "a", endTime: new Date("2026-01-01T00:00:00Z") },
+      { id: "b", endTime: new Date("2026-02-01T00:00:00Z") },
+    ];
+    const next = [
+      { id: "a", endTime: new Date("2026-01-01T00:00:00Z") },
+      { id: "b", endTime: new Date("2026-03-01T00:00:00Z") },
+    ];
+    const out = mergeById(prev, next);
+    expect(out).not.toBe(prev);
+    expect(out[0]).toBe(prev[0]);
+    expect(out[1]).toBe(next[1]);
+  });
+
+  it("does not treat a Date and a non-Date as equal", () => {
+    const ts = new Date("2026-01-01T00:00:00Z");
+    const prev = [{ id: "a", endTime: ts as Date | number }];
+    const next = [{ id: "a", endTime: ts.getTime() as Date | number }];
+    expect(mergeById(prev, next)[0]).toBe(next[0]);
+  });
+});
