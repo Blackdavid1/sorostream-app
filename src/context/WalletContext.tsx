@@ -45,6 +45,14 @@ interface WalletContextValue {
    */
   balanceRefreshTrigger: number;
   refetchBalance: () => void;
+  /** Last fetched native (XLM) balance for the connected wallet, or null. */
+  balance: string | null;
+  /**
+   * Fetch the wallet balance right now, independent of any polling, and
+   * update the cached `balance`. Useful after a transaction completed outside
+   * this app (e.g. from the wallet extension's own UI).
+   */
+  refreshBalance: () => Promise<string | null>;
   /** Timestamp when session will expire, or null if not set. */
   sessionExpiresAt: number | null;
   /** Time until session expires in milliseconds, or null if not set. */
@@ -86,6 +94,10 @@ interface WalletContextValue {
 
 const WalletContext = createContext<WalletContextValue | undefined>(undefined);
 
+const HORIZON_URL = process.env.NEXT_PUBLIC_RPC_URL
+  ? process.env.NEXT_PUBLIC_RPC_URL.replace("/rpc/v1", "")
+  : "https://horizon-testnet.stellar.org";
+
 /** Polling interval (ms) used by WatchWalletChanges. */
 const WATCH_INTERVAL = 2000;
 
@@ -113,6 +125,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   const [error, setError] = useState<string | null>(null);
   const [networkMismatch, setNetworkMismatch] = useState(false);
   const [balanceRefreshTrigger, setBalanceRefreshTrigger] = useState(0);
+  const [balance, setBalance] = useState<string | null>(null);
   const [streamRefreshTrigger, setStreamRefreshTrigger] = useState(0);
   const [sessionExpiresAt, setSessionExpiresAt] = useState<number | null>(null);
   const [showSessionWarning5Min, setShowSessionWarning5Min] = useState(false);
@@ -225,6 +238,29 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   const refetchBalance = useCallback(() => {
     setBalanceRefreshTrigger((n) => n + 1);
   }, []);
+
+  const refreshBalance = useCallback(async (): Promise<string | null> => {
+    if (!address) {
+      setBalance(null);
+      return null;
+    }
+    try {
+      const res = await fetch(`${HORIZON_URL}/accounts/${address}`);
+      if (!res.ok) throw new Error(`Horizon ${res.status}`);
+      const data = (await res.json()) as {
+        balances?: { asset_type: string; balance: string }[];
+      };
+      const native = data.balances?.find((b) => b.asset_type === "native");
+      const next = native ? native.balance : null;
+      setBalance(next);
+      // Let other balance consumers (e.g. NavHeader) re-fetch as well.
+      setBalanceRefreshTrigger((n) => n + 1);
+      return next;
+    } catch (err) {
+      console.error("Failed to refresh balance:", err);
+      return null;
+    }
+  }, [address]);
 
 
   const handleConnectionTimeout = useCallback(() => {
@@ -546,6 +582,8 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       disconnect,
       balanceRefreshTrigger,
       refetchBalance,
+      balance,
+      refreshBalance,
       sessionExpiresAt,
       sessionTimeRemaining,
       showSessionWarning5Min,
@@ -570,6 +608,8 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       networkMismatch,
       balanceRefreshTrigger,
       refetchBalance,
+      balance,
+      refreshBalance,
       sessionExpiresAt,
       sessionTimeRemaining,
       showSessionWarning5Min,
