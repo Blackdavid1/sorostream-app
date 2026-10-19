@@ -1,9 +1,12 @@
 "use client";
 import {
   createContext,
+  useCallback,
   useContext,
-  useState,
   useEffect,
+  useMemo,
+  useRef,
+  useState,
   type ReactNode,
 } from "react";
 import { useNetwork } from "@/src/lib/network";
@@ -11,6 +14,12 @@ import { useNetwork } from "@/src/lib/network";
 interface ContractVersionContextType {
   version: string | null;
   loading: boolean;
+  /**
+   * Re-check the contract version now (e.g. right after a network switch).
+   * If a check is already running, the same in-flight promise is returned
+   * instead of starting a second request.
+   */
+  refresh: () => Promise<void>;
 }
 
 const ContractVersionContext =
@@ -19,7 +28,7 @@ const ContractVersionContext =
 /**
  * Access the shared contract version check.
  *
- * @returns {ContractVersionContextType} Expected/deployed contract versions and whether they mismatch.
+ * @returns {ContractVersionContextType} The deployed contract version, a loading flag and a `refresh` function.
  * @throws {Error} When called outside a `ContractVersionProvider`.
  */
 export function useContractVersion(): ContractVersionContextType {
@@ -41,6 +50,8 @@ export function useContractVersion(): ContractVersionContextType {
  * - Calls the Soroban RPC simulateTransaction endpoint to invoke get_version().
  * - Falls back to "unknown" on any network/parse error.
  * - Re-fetches automatically when the network or rpcUrl changes.
+ * - Exposes `refresh()` so other code can force a re-check deterministically.
+ *   Concurrent `refresh()` calls share one in-flight request.
  */
 export function ContractVersionProvider({
   children,
@@ -51,80 +62,111 @@ export function ContractVersionProvider({
   const [version, setVersion] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
+  // Each check gets an id; only the latest one may update state. This drops
+  // results from checks that were superseded by a network change or unmount.
+  const requestIdRef = useRef(0);
+  const inFlightRef = useRef<Promise<void> | null>(null);
+
+  const runCheck = useCallback(
+    (resetVersion: boolean): Promise<void> => {
+      const requestId = ++requestIdRef.current;
+      const isCurrent = () => requestIdRef.current === requestId;
+
+      if (resetVersion) setVersion(null);
+      setLoading(true);
+
+      const promise = fetchContractVersion(rpcUrl)
+        .then((result) => {
+          if (isCurrent()) setVersion(result);
+        })
+        .finally(() => {
+          if (isCurrent()) {
+            setLoading(false);
+            inFlightRef.current = null;
+          }
+        });
+
+      inFlightRef.current = promise;
+      return promise;
+    },
+    [rpcUrl],
+  );
+
   useEffect(() => {
-    let cancelled = false;
-    setVersion(null);
-    setLoading(true);
-
-    async function fetchVersion() {
-      try {
-        const contractId = process.env.NEXT_PUBLIC_CONTRACT_ID;
-
-        if (!contractId) {
-          // No contract configured — show graceful placeholder.
-          if (!cancelled) setVersion("unknown");
-          return;
-        }
-
-        // Attempt to call get_version() via Soroban RPC simulateTransaction.
-        // The function takes no arguments and returns a string (version tag).
-        const effectiveRpcUrl =
-          process.env.NEXT_PUBLIC_RPC_URL ?? rpcUrl;
-
-        const body = JSON.stringify({
-          jsonrpc: "2.0",
-          id: 1,
-          method: "simulateTransaction",
-          params: {
-            transaction: buildGetVersionXdr(contractId),
-          },
-        });
-
-        const resp = await fetch(effectiveRpcUrl, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body,
-          signal: AbortSignal.timeout(8_000),
-        });
-
-        if (!resp.ok) throw new Error(`RPC HTTP ${resp.status}`);
-
-        const json = (await resp.json()) as {
-          result?: { results?: Array<{ xdr?: string }> };
-          error?: unknown;
-        };
-
-        if (json.error) throw new Error("RPC returned error");
-
-        const xdr = json.result?.results?.[0]?.xdr;
-        if (xdr) {
-          // Decode the XDR string value returned by get_version().
-          const decoded = decodeScValString(xdr);
-          if (!cancelled) setVersion(decoded ?? "unknown");
-        } else {
-          if (!cancelled) setVersion("unknown");
-        }
-      } catch {
-        // Any failure (network error, RPC error, parse error) → show "unknown"
-        // so the footer is always informative rather than blank or broken.
-        if (!cancelled) setVersion("unknown");
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    }
-
-    void fetchVersion();
+    void runCheck(true);
 
     return () => {
-      cancelled = true;
+      // Invalidate the running check so it can't overwrite newer state.
+      requestIdRef.current++;
+      inFlightRef.current = null;
     };
-  }, [network, rpcUrl]);
+  }, [network, runCheck]);
+
+  const refresh = useCallback(
+    () => inFlightRef.current ?? runCheck(false),
+    [runCheck],
+  );
+
+  const value = useMemo(
+    () => ({ version, loading, refresh }),
+    [version, loading, refresh],
+  );
 
   return (
-    <ContractVersionContext.Provider value={{ version, loading }}>
+    <ContractVersionContext.Provider value={value}>
       {children}
     </ContractVersionContext.Provider>
   );
+}
+
+/**
+ * Call get_version() on the configured contract. Never throws: any failure
+ * (missing config, network error, RPC error, parse error) resolves to
+ * "unknown" so the footer is always informative rather than blank or broken.
+ */
+async function fetchContractVersion(rpcUrl: string): Promise<string> {
+  try {
+    const contractId = process.env.NEXT_PUBLIC_CONTRACT_ID;
+
+    // No contract configured — show graceful placeholder.
+    if (!contractId) return "unknown";
+
+    // Attempt to call get_version() via Soroban RPC simulateTransaction.
+    // The function takes no arguments and returns a string (version tag).
+    const effectiveRpcUrl = process.env.NEXT_PUBLIC_RPC_URL ?? rpcUrl;
+
+    const body = JSON.stringify({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "simulateTransaction",
+      params: {
+        transaction: buildGetVersionXdr(contractId),
+      },
+    });
+
+    const resp = await fetch(effectiveRpcUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body,
+      signal: AbortSignal.timeout(8_000),
+    });
+
+    if (!resp.ok) throw new Error(`RPC HTTP ${resp.status}`);
+
+    const json = (await resp.json()) as {
+      result?: { results?: Array<{ xdr?: string }> };
+      error?: unknown;
+    };
+
+    if (json.error) throw new Error("RPC returned error");
+
+    const xdr = json.result?.results?.[0]?.xdr;
+    if (!xdr) return "unknown";
+    // Decode the XDR string value returned by get_version().
+    return decodeScValString(xdr) ?? "unknown";
+  } catch {
+    return "unknown";
+  }
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
