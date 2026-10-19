@@ -122,10 +122,14 @@ export interface UseFormPersistReturn {
  * ```
  *
  * The hook debounces writes by 150 ms so rapid keystrokes don't saturate
- * sessionStorage with synchronous calls on every keystroke.
+ * sessionStorage with synchronous calls on every keystroke. Once `clearDraft`
+ * is called, any write debounced before the clear is discarded when its timer
+ * fires, so a cleared draft can never be resurrected by an in-flight write;
+ * saves made after the clear (a fresh editing session) persist as usual.
  */
 export function useFormPersist(): UseFormPersistReturn {
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const generationRef = useRef(0);
 
   // Cancel any pending debounced write on unmount
   useEffect(() => {
@@ -138,13 +142,16 @@ export function useFormPersist(): UseFormPersistReturn {
 
   const saveDraft = useCallback((draft: CreateStreamDraft) => {
     if (timerRef.current !== null) clearTimeout(timerRef.current);
+    const generation = generationRef.current;
     timerRef.current = setTimeout(() => {
-      writeDraft(draft);
       timerRef.current = null;
+      if (generation !== generationRef.current) return;
+      writeDraft(draft);
     }, 150);
   }, []);
 
   const clearDraftCb = useCallback(() => {
+    generationRef.current += 1;
     if (timerRef.current !== null) {
       clearTimeout(timerRef.current);
       timerRef.current = null;
