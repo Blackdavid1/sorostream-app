@@ -101,4 +101,59 @@ describe("simulateStreamDryRun (#430)", () => {
     expect(result.netTotalStroops).toBe(100 * STROOPS);
     expect(result.checkpoints.every((c) => c.feeStroops === 0)).toBe(true);
   });
+
+  it("deducts the protocol fee exactly once at each post-cliff checkpoint (#716)", () => {
+    const bps = 50; // 0.5%
+    const result = simulateStreamDryRun({
+      amountStroops: 1000 * STROOPS,
+      durationSeconds: 1000,
+      cliffSeconds: 400, // cliff at 40%: the 50/75/100% checkpoints are post-cliff
+      feeBasisPoints: bps,
+      startTime: START,
+    });
+    expect(result.ok).toBe(true);
+
+    const [start, q1, q2, q3, end] = result.checkpoints;
+
+    // Pre-cliff: nothing vested, nothing charged.
+    for (const c of [start, q1]) {
+      expect(c.vestedStroops).toBe(0);
+      expect(c.feeStroops).toBe(0);
+      expect(c.netStroops).toBe(0);
+    }
+
+    // Post-cliff: one fee on the cumulative vested amount, including the
+    // part released at the cliff.
+    const expected = [
+      [q2, 500 * STROOPS],
+      [q3, 750 * STROOPS],
+      [end, 1000 * STROOPS],
+    ] as const;
+    for (const [c, vested] of expected) {
+      const singleFee = Math.floor((vested * bps) / 10_000);
+      expect(c.vestedStroops).toBe(vested);
+      expect(c.feeStroops).toBe(singleFee);
+      expect(c.netStroops).toBe(vested - singleFee);
+    }
+
+    // The final checkpoint matches the whole-deposit totals.
+    expect(end.feeStroops).toBe(result.totalFeeStroops);
+    expect(end.netStroops).toBe(result.netTotalStroops);
+  });
+
+  it("gives the same post-cliff fees as a no-cliff stream at the same checkpoints", () => {
+    const base = {
+      amountStroops: 1000 * STROOPS,
+      durationSeconds: 1000,
+      feeBasisPoints: 50,
+      startTime: START,
+    };
+    const noCliff = simulateStreamDryRun(base);
+    const withCliff = simulateStreamDryRun({ ...base, cliffSeconds: 400 });
+
+    for (const i of [2, 3, 4]) {
+      expect(withCliff.checkpoints[i].feeStroops).toBe(noCliff.checkpoints[i].feeStroops);
+      expect(withCliff.checkpoints[i].netStroops).toBe(noCliff.checkpoints[i].netStroops);
+    }
+  });
 });

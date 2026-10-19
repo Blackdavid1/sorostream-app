@@ -23,6 +23,22 @@ const RateLimitContext = createContext<RateLimitContextValue | undefined>(undefi
 
 const INITIAL: RateLimitContextValue = { active: false, secondsLeft: 0, attempt: 0 };
 
+/**
+ * Normalize an incoming rate-limit event into context state.
+ *
+ * When the countdown reaches zero we collapse `active` and `secondsLeft` in a
+ * single update so consumers never observe `secondsLeft === 0` while `active`
+ * is still true (which would flash a "0s" banner for one render).
+ */
+function toState(info: RateLimitInfo): RateLimitContextValue {
+  const active = info.active && info.secondsLeft > 0;
+  return {
+    active,
+    secondsLeft: active ? info.secondsLeft : 0,
+    attempt: info.attempt,
+  };
+}
+
 export function RateLimitProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<RateLimitContextValue>(INITIAL);
 
@@ -30,12 +46,9 @@ export function RateLimitProvider({ children }: { children: ReactNode }) {
     // Only subscribe in the browser; the emitter is a no-op on the server.
     if (typeof window === "undefined") return;
     return onRateLimit((info: RateLimitInfo) => {
-      setState({
-        // Auto-dismiss once the retry window has elapsed.
-        active: info.active && info.secondsLeft > 0,
-        secondsLeft: info.secondsLeft,
-        attempt: info.attempt,
-      });
+      // Auto-dismiss once the retry window has elapsed. `toState` flips
+      // `active` to false and zeroes `secondsLeft` atomically.
+      setState(toState(info));
     });
   }, []);
 

@@ -1,5 +1,28 @@
 /**
  * IndexedDB utility for storing and retrieving balance history snapshots
+ *
+ * ## Purpose
+ * This module is the **long-term, time-series history store**. It persists
+ * balance snapshots over time so the UI can render historical charts, compute
+ * period-over-period changes (`calculatePeriodChange`) and filter by ranges
+ * such as 1D/7D/30D/90D/ALL (`filterByTimeRange`). Snapshots are keyed by
+ * timestamp and retained for a configurable window (see `cleanupOldSnapshots`,
+ * default 90 days).
+ *
+ * ## When to use this vs. `balanceCache.ts`
+ * - Use **this module** when you need a durable, append-only series of past
+ *   balances for analytics, charts, or trend calculations.
+ * - Use **`balanceCache.ts`** when you need a short-lived, latest-value cache
+ *   for fast reads of the *current* balance (e.g. avoiding redundant network
+ *   calls). It is not intended to be queried as a time series.
+ *
+ * ## Relationship to `balanceCache.ts`
+ * The two stores intentionally serve distinct use cases (history vs. cache),
+ * but their `BalanceSnapshot` shapes and IndexedDB plumbing overlap. That
+ * overlap is **legacy duplication slated for consolidation** — see the related
+ * consolidation/duplication enhancement tracking issue. Until that lands, keep
+ * the two modules consistent: if you change the snapshot shape or storage
+ * semantics here, check whether `balanceCache.ts` needs the same change.
  */
 
 const DB_NAME = "SoroStreamBalanceHistory";
@@ -169,4 +192,3 @@ export function filterByTimeRange(
   const startTime = now - ranges[range];
   return snapshots.filter((s) => s.timestamp >= startTime);
 }
-

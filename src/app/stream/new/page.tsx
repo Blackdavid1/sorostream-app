@@ -761,14 +761,16 @@ function NewStreamWizard() {
         feeSponsorAddress: feeBumpEnabled && feeSponsorAddress ? feeSponsorAddress : undefined,
       });
 
+      // Clear the persisted draft the moment the stream is confirmed on-chain,
+      // so nothing that runs during the success screen (or after navigation)
+      // can leave the just-submitted form data behind for the next visit (#721).
+      clearDraft();
+
       setTxStage(TxStage.Done);
       trackEvent({ type: "stream_create_complete", streamId: result.streamId });
 
       // Auto-close after 2 seconds, then redirect
       await new Promise((r) => setTimeout(r, 2000));
-
-      // Clear persisted draft on successful creation
-      clearDraft();
 
       setRecipient("");
       setAmount("");

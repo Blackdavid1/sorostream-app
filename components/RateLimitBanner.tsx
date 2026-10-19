@@ -10,7 +10,10 @@ import { useRateLimit } from "@/src/context/RateLimitContext";
 export default function RateLimitBanner() {
   const { active, secondsLeft } = useRateLimit();
 
-  if (!active) return null;
+  // Guard against a transient render where the countdown has reached zero but
+  // `active` has not yet flipped to false. Treating a zero countdown as
+  // inactive keeps the banner from flashing a "0s" frame before it disappears.
+  if (!active || secondsLeft <= 0) return null;
 
   return (
     <div

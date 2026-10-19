@@ -3,13 +3,13 @@
 import { useEffect, useState, useMemo } from "react";
 import {
   type StreamData,
+  claimableNow,
   formatStellarAmount,
   getStreamedAmount,
 } from "@/src/lib/sorostream";
 import {
-  getStreamHealth,
+  getStreamHealthDetails,
   HEALTH_BADGE_CLASSES,
-  type StreamHealthStatus,
 } from "@/src/lib/streamHealth";
 import StreamHealthBadge, {
   calculateHealthScore,
@@ -42,8 +42,13 @@ export default function StreamHealthCard({
   const endMs = useMemo(() => new Date(stream.endTime).getTime(), [stream.endTime]);
   const totalDurationMs = Math.max(1, endMs - startMs);
 
-  const healthStatus: StreamHealthStatus = useMemo(() => {
-    return getStreamHealth(stream, now);
+  const { status: healthStatus, hasUnclaimedBalance } = useMemo(() => {
+    // claimableNow only stops accruing at endTime for an "Ended" status, so
+    // treat a stream whose end time has passed as ended. Otherwise a fully
+    // withdrawn stream would still look like it has funds left (#717).
+    const pastEnd = stream.status === "Active" && now >= new Date(stream.endTime).getTime();
+    const unclaimed = claimableNow(pastEnd ? { ...stream, status: "Ended" } : stream);
+    return getStreamHealthDetails(stream, unclaimed, now);
   }, [stream, now]);
 
   const isEnded = healthStatus === "Expired" || stream.status === "Ended" || now >= endMs;
@@ -141,6 +146,15 @@ export default function StreamHealthCard({
           >
             {isEnded && stream.status !== "Cancelled" ? "Completed" : healthStatus}
           </span>
+          {hasUnclaimedBalance && (
+            <span
+              className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-100 dark:bg-amber-900 text-amber-700 dark:text-amber-400"
+              data-testid="health-unclaimed-badge"
+              title="This stream has ended but still holds funds you can withdraw."
+            >
+              Funds to claim
+            </span>
+          )}
         </div>
 
         {!isCancelled && !isEnded && (

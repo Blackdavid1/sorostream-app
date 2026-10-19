@@ -4,8 +4,36 @@
  * Stores periodic balance snapshots (hourly) so the portfolio chart can show
  * historical balance trends without hitting the Horizon API on every visit.
  *
- * Snapshots are keyed by `(address, timestamp)` and auto-expire after 90 days:
- * expired rows are deleted on every write and filtered out (and deleted) on read.
+ * Snapshots are keyed by `(address, timestamp)` and auto-expire after 90 days.
+ *
+ * ## Purpose & lifecycle
+ *
+ * This store is the *write-through cache* for the live portfolio view. It is
+ * populated opportunistically by the app (see `shouldSnapshot`, which throttles
+ * writes to at most one snapshot per hour per address) and read back to render
+ * the balance trend chart. Entries are short-lived: they are pruned on read
+ * once they fall outside the 90-day lookback window, and can be dropped
+ * wholesale via `clearSnapshots` (e.g. on wallet disconnect).
+ *
+ * ## balanceCache vs. balanceHistory
+ *
+ * `src/lib/balanceHistory.ts` is a *separate* store with a deliberately
+ * different role: it holds the user-facing, append-only history that backs the
+ * "Balance history" screen and export flows, where entries are expected to
+ * persist and be queried by explicit date ranges rather than being silently
+ * expired. The two stores are NOT interchangeable:
+ *
+ * - Use `balanceCache` when you need a cheap, self-expiring cache of recent
+ *   snapshots to avoid redundant Horizon calls (charts, dashboards).
+ * - Use `balanceHistory` when you need durable, user-visible history that
+ *   should survive cache eviction and be listed/exported.
+ *
+ * The overlap in shape (both expose a `BalanceSnapshot`-like record) is
+ * intentional for now — they serve distinct use cases — but the duplication is
+ * tracked for consolidation in the balance-store consolidation enhancement
+ * (see issue #742 and its linked follow-up). Keep the two in sync when either
+ * interface changes, and prefer extending `balanceHistory` for anything that
+ * must outlive the cache.
  */
 
 const DB_NAME = "sorostream_balance_cache";

@@ -15,6 +15,11 @@ describe("getTotalPages", () => {
     expect(getTotalPages(21, 20)).toBe(2);
     expect(getTotalPages(45, 20)).toBe(3);
   });
+
+  it("returns 1 for a non-finite page size", () => {
+    expect(getTotalPages(45, Number.NaN)).toBe(1);
+    expect(getTotalPages(45, Number.POSITIVE_INFINITY)).toBe(1);
+  });
 });
 
 describe("clampPage", () => {
@@ -67,6 +72,37 @@ describe("usePagination", () => {
     expect(result.current.totalPages).toBe(2);
     expect(result.current.currentPage).toBe(2);
     expect(result.current.hasNext).toBe(false);
+  });
+
+  it("re-clamps a stored page when the page size grows mid-session (#715)", () => {
+    // 60 items at 10 per page → 6 pages; the user is on page 6.
+    const { result, rerender } = renderHook(
+      ({ size }) => usePagination(60, size),
+      { initialProps: { size: 10 } },
+    );
+    act(() => result.current.setPage(6));
+    expect(result.current.currentPage).toBe(6);
+
+    // Page size changes to 20 → only 3 pages. Page 6 is out of range.
+    rerender({ size: 20 });
+    expect(result.current.totalPages).toBe(3);
+    expect(result.current.currentPage).toBe(3);
+    expect(result.current.pageStart).toBe(40);
+    expect(result.current.pageEnd).toBe(60);
+    expect(result.current.hasNext).toBe(false);
+
+    // The stored page itself was clamped, not just the derived value:
+    // going back to 10 per page keeps page 3 instead of jumping to 6.
+    rerender({ size: 10 });
+    expect(result.current.totalPages).toBe(6);
+    expect(result.current.currentPage).toBe(3);
+  });
+
+  it("keeps the page usable when the page size is invalid", () => {
+    const { result } = renderHook(() => usePagination(45, Number.NaN));
+    expect(result.current.totalPages).toBe(Math.ceil(45 / DASHBOARD_PAGE_SIZE));
+    expect(result.current.currentPage).toBe(1);
+    expect(result.current.pageEnd).toBe(DASHBOARD_PAGE_SIZE);
   });
 
   it("does not go past the first or last page", () => {

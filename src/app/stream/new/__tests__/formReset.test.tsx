@@ -1,7 +1,7 @@
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import NewStreamPage from "@/src/app/stream/new/page";
-import { FORM_DRAFT_KEY } from "@/src/lib/useFormPersist";
+import { FORM_DRAFT_KEY, readDraft } from "@/src/lib/useFormPersist";
 
 const push = vi.fn();
 const triggerStreamRefresh = vi.fn();
@@ -86,7 +86,7 @@ describe("Create stream happy path", () => {
     const draft = { recipient, amount: "100", duration: 3600, selectedToken: "USDC", customTokenAddress: "", endDate: "", cliffDate: "" };
     window.sessionStorage.setItem(FORM_DRAFT_KEY, JSON.stringify(draft));
 
-    render(<NewStreamPage />);
+    const view = render(<NewStreamPage />);
 
     const recipientInput = screen.getByTestId("recipient-input");
     fireEvent.change(recipientInput, { target: { value: recipient } });
@@ -116,5 +116,14 @@ describe("Create stream happy path", () => {
     );
     await waitFor(() => expect(window.sessionStorage.getItem(FORM_DRAFT_KEY)).toBeNull());
     expect(triggerStreamRefresh).toHaveBeenCalledTimes(1);
+    expect(readDraft()).toBeNull();
+
+    // The next mount of the create-stream form must start empty — the draft
+    // from the just-completed stream must not re-populate any fields (#721).
+    view.unmount();
+    render(<NewStreamPage />);
+    const freshRecipientInput = screen.getByTestId("recipient-input") as HTMLInputElement;
+    expect(freshRecipientInput.value).toBe("");
+    expect(readDraft()).toBeNull();
   }, 20_000);
 });
