@@ -39,15 +39,15 @@ export interface StatusBadgeProps {
 
 const STATUS_CLASSES: Record<string, string> = {
   Active:
-    "bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-400",
+    "bg-green-100 dark:bg-green-900 text-green-900 dark:text-green-100",
   Paused:
-    "bg-amber-100 dark:bg-amber-900 text-amber-700 dark:text-amber-400",
+    "bg-amber-100 dark:bg-amber-900 text-amber-950 dark:text-amber-100",
   Completed:
-    "bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-400",
+    "bg-blue-100 dark:bg-blue-900 text-blue-900 dark:text-blue-100",
   Ended:
-    "bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-400",
+    "bg-blue-100 dark:bg-blue-900 text-blue-900 dark:text-blue-100",
   Cancelled:
-    "bg-red-100 dark:bg-red-900 text-red-700 dark:text-red-400",
+    "bg-red-100 dark:bg-red-900 text-red-900 dark:text-red-100",
   Scheduled:
     "bg-blue-900/60 text-blue-300 border border-blue-700",
 };
